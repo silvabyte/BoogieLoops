@@ -203,5 +203,260 @@ object MagicNumberTests extends TestSuite {
         assert(sig.mimeType.nonEmpty)
       }
     }
+
+    // ============================================================================
+    // Document format tests (for resume uploads)
+    // ============================================================================
+
+    test("detect RTF from magic bytes") {
+      val rtfHeader = Array[Byte](0x7b, 0x5c, 0x72, 0x74, 0x66, 0x31) // {\rtf1
+      val result = MagicNumber.detect(rtfHeader)
+
+      assert(result.isDefined)
+      assert(result.get.name == "Rich Text Format")
+      assert(result.get.mimeType == "application/rtf")
+      assert(result.get.ext == "rtf")
+    }
+
+    test("isRtf returns true for RTF") {
+      val rtfHeader = Array[Byte](0x7b, 0x5c, 0x72, 0x74, 0x66, 0x31)
+      assert(MagicNumber.isRtf(rtfHeader))
+    }
+
+    test("isRtf returns false for non-RTF") {
+      val pdfHeader = Array[Byte](0x25, 0x50, 0x44, 0x46)
+      assert(!MagicNumber.isRtf(pdfHeader))
+    }
+
+    test("detect UTF-8 BOM") {
+      val utf8Bom = Array[Byte](0xef.toByte, 0xbb.toByte, 0xbf.toByte, 0x48, 0x65, 0x6c, 0x6c, 0x6f)
+      val result = MagicNumber.detect(utf8Bom)
+
+      assert(result.isDefined)
+      assert(result.get.name == "UTF-8 Text (BOM)")
+      assert(result.get.mimeType == "text/plain")
+    }
+
+    test("detect UTF-16 LE BOM") {
+      val utf16LeBom = Array[Byte](0xff.toByte, 0xfe.toByte, 0x48, 0x00, 0x65, 0x00)
+      val result = MagicNumber.detect(utf16LeBom)
+
+      assert(result.isDefined)
+      assert(result.get.name == "UTF-16 LE Text (BOM)")
+      assert(result.get.mimeType == "text/plain")
+    }
+
+    test("detect UTF-16 BE BOM") {
+      val utf16BeBom = Array[Byte](0xfe.toByte, 0xff.toByte, 0x00, 0x48, 0x00, 0x65)
+      val result = MagicNumber.detect(utf16BeBom)
+
+      assert(result.isDefined)
+      assert(result.get.name == "UTF-16 BE Text (BOM)")
+      assert(result.get.mimeType == "text/plain")
+    }
+
+    test("detect UTF-32 LE BOM") {
+      val utf32LeBom = Array[Byte](0xff.toByte, 0xfe.toByte, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00)
+      val result = MagicNumber.detect(utf32LeBom)
+
+      assert(result.isDefined)
+      assert(result.get.name == "UTF-32 LE Text (BOM)")
+      assert(result.get.mimeType == "text/plain")
+    }
+
+    test("detect UTF-32 BE BOM") {
+      val utf32BeBom = Array[Byte](0x00, 0x00, 0xfe.toByte, 0xff.toByte, 0x00, 0x00, 0x00, 0x48)
+      val result = MagicNumber.detect(utf32BeBom)
+
+      assert(result.isDefined)
+      assert(result.get.name == "UTF-32 BE Text (BOM)")
+      assert(result.get.mimeType == "text/plain")
+    }
+
+    test("hasTextBom returns true for UTF-8 BOM") {
+      val utf8Bom = Array[Byte](0xef.toByte, 0xbb.toByte, 0xbf.toByte, 0x48, 0x65)
+      assert(MagicNumber.hasTextBom(utf8Bom))
+    }
+
+    test("hasTextBom returns false for PDF") {
+      val pdfHeader = Array[Byte](0x25, 0x50, 0x44, 0x46)
+      assert(!MagicNumber.hasTextBom(pdfHeader))
+    }
+
+    test("detect XML declaration") {
+      val xmlHeader = "<?xml version=\"1.0\"?>".getBytes("UTF-8")
+      val result = MagicNumber.detect(xmlHeader)
+
+      assert(result.isDefined)
+      assert(result.get.name == "XML")
+      assert(result.get.mimeType == "application/xml")
+    }
+
+    test("detect HTML DOCTYPE") {
+      val htmlHeader = "<!DOCTYPE html>".getBytes("UTF-8")
+      val result = MagicNumber.detect(htmlHeader)
+
+      assert(result.isDefined)
+      assert(result.get.name == "HTML")
+      assert(result.get.mimeType == "text/html")
+    }
+
+    test("detect HTML tag") {
+      val htmlHeader = "<html><head>".getBytes("UTF-8")
+      val result = MagicNumber.detect(htmlHeader)
+
+      assert(result.isDefined)
+      assert(result.get.name == "HTML")
+      assert(result.get.mimeType == "text/html")
+    }
+
+    test("detect Microsoft Compound Document (DOC)") {
+      val docHeader = Array[Byte](
+        0xd0.toByte,
+        0xcf.toByte,
+        0x11,
+        0xe0.toByte,
+        0xa1.toByte,
+        0xb1.toByte,
+        0x1a,
+        0xe1.toByte
+      )
+      val result = MagicNumber.detect(docHeader)
+
+      assert(result.isDefined)
+      assert(result.get.name == "Microsoft Compound Document")
+      assert(result.get.mimeType == "application/msword")
+      assert(result.get.supportedExtensions.contains("doc"))
+      assert(result.get.supportedExtensions.contains("xls"))
+    }
+
+    // ============================================================================
+    // Resume format validation tests
+    // ============================================================================
+
+    test("isDocument returns true for PDF") {
+      val pdfHeader = Array[Byte](0x25, 0x50, 0x44, 0x46)
+      assert(MagicNumber.isDocument(pdfHeader))
+    }
+
+    test("isDocument returns true for RTF") {
+      val rtfHeader = Array[Byte](0x7b, 0x5c, 0x72, 0x74, 0x66, 0x31)
+      assert(MagicNumber.isDocument(rtfHeader))
+    }
+
+    test("isDocument returns true for DOC") {
+      val docHeader = Array[Byte](
+        0xd0.toByte,
+        0xcf.toByte,
+        0x11,
+        0xe0.toByte,
+        0xa1.toByte,
+        0xb1.toByte,
+        0x1a,
+        0xe1.toByte
+      )
+      assert(MagicNumber.isDocument(docHeader))
+    }
+
+    test("isDocument returns true for ZIP (DOCX)") {
+      val zipHeader = Array[Byte](0x50, 0x4b, 0x03, 0x04)
+      assert(MagicNumber.isDocument(zipHeader))
+    }
+
+    test("isDocument returns true for text with BOM") {
+      val utf8Bom = Array[Byte](0xef.toByte, 0xbb.toByte, 0xbf.toByte)
+      assert(MagicNumber.isDocument(utf8Bom))
+    }
+
+    test("isDocument returns false for JPEG") {
+      val jpegHeader = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte)
+      assert(!MagicNumber.isDocument(jpegHeader))
+    }
+
+    test("isDocument returns false for EXE") {
+      val exeHeader = Array[Byte](0x4d, 0x5a)
+      assert(!MagicNumber.isDocument(exeHeader))
+    }
+
+    test("isResumeFormat returns true for PDF") {
+      val pdfHeader = Array[Byte](0x25, 0x50, 0x44, 0x46)
+      assert(MagicNumber.isResumeFormat(pdfHeader))
+    }
+
+    test("isResumeFormat returns true for DOCX (ZIP)") {
+      val zipHeader = Array[Byte](0x50, 0x4b, 0x03, 0x04)
+      assert(MagicNumber.isResumeFormat(zipHeader))
+    }
+
+    test("isResumeFormat returns true for RTF") {
+      val rtfHeader = Array[Byte](0x7b, 0x5c, 0x72, 0x74, 0x66, 0x31)
+      assert(MagicNumber.isResumeFormat(rtfHeader))
+    }
+
+    test("isResumeFormat returns true for HTML") {
+      val htmlHeader = "<!DOCTYPE html>".getBytes("UTF-8")
+      assert(MagicNumber.isResumeFormat(htmlHeader))
+    }
+
+    test("isResumeFormat returns false for JPEG") {
+      val jpegHeader = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte)
+      assert(!MagicNumber.isResumeFormat(jpegHeader))
+    }
+
+    test("isResumeFormat returns false for EXE") {
+      val exeHeader = Array[Byte](0x4d, 0x5a, 0x90.toByte)
+      assert(!MagicNumber.isResumeFormat(exeHeader))
+    }
+
+    test("ResumeMimeTypes contains expected types") {
+      assert(MagicNumber.ResumeMimeTypes.contains("application/pdf"))
+      assert(MagicNumber.ResumeMimeTypes.contains("application/msword"))
+      assert(MagicNumber.ResumeMimeTypes.contains("application/rtf"))
+      assert(MagicNumber.ResumeMimeTypes.contains("text/plain"))
+      assert(MagicNumber.ResumeMimeTypes.contains("application/zip"))
+    }
+
+    // ============================================================================
+    // Plain text heuristic tests
+    // ============================================================================
+
+    test("isLikelyPlainText returns true for ASCII text") {
+      val asciiText = "Hello, this is a plain text resume.".getBytes("UTF-8")
+      assert(MagicNumber.isLikelyPlainText(asciiText))
+    }
+
+    test("isLikelyPlainText returns true for text with newlines") {
+      val textWithNewlines = "Name: John Doe\nEmail: john@example.com\nSkills: Scala, Java".getBytes("UTF-8")
+      assert(MagicNumber.isLikelyPlainText(textWithNewlines))
+    }
+
+    test("isLikelyPlainText returns true for UTF-8 text with BOM") {
+      val utf8Bom = Array[Byte](0xef.toByte, 0xbb.toByte, 0xbf.toByte) ++ "Hello".getBytes("UTF-8")
+      assert(MagicNumber.isLikelyPlainText(utf8Bom))
+    }
+
+    test("isLikelyPlainText returns false for binary PDF") {
+      val pdfHeader = Array[Byte](0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02)
+      assert(!MagicNumber.isLikelyPlainText(pdfHeader))
+    }
+
+    test("isLikelyPlainText returns false for empty array") {
+      assert(!MagicNumber.isLikelyPlainText(Array.empty))
+    }
+
+    test("isLikelyPlainText returns true for HTML content") {
+      val htmlContent = "<!DOCTYPE html><html><body>Resume</body></html>".getBytes("UTF-8")
+      assert(MagicNumber.isLikelyPlainText(htmlContent))
+    }
+
+    test("isLikelyPlainText returns true for XML content") {
+      val xmlContent = "<?xml version=\"1.0\"?><resume><name>John</name></resume>".getBytes("UTF-8")
+      assert(MagicNumber.isLikelyPlainText(xmlContent))
+    }
+
+    test("isResumeFormat returns true for plain text without BOM") {
+      val plainText = "John Doe\nSoftware Engineer\nSkills: Scala, Java, Python".getBytes("UTF-8")
+      assert(MagicNumber.isResumeFormat(plainText))
+    }
   }
 }

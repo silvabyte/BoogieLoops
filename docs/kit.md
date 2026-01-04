@@ -144,8 +144,10 @@ MagicNumber.isAllowed(header, allowed)  // true if file type is in set
 
 | Category | Formats |
 |----------|---------|
+| Documents | PDF, RTF, DOC (legacy), WordPerfect |
+| Office (ZIP-based) | DOCX, XLSX, PPTX, ODT, ODS, ODP, EPUB |
+| Text | UTF-8/16/32 with BOM, XML, HTML |
 | Images | PNG, JPEG, GIF, BMP, WEBP, TIFF |
-| Documents | PDF, ZIP (DOCX, XLSX, PPTX, ODT), DOC (legacy) |
 | Compressed | RAR, 7Z, GZIP, BZIP2, XZ |
 | Audio | MP3, WAV, FLAC, OGG |
 | Video | MKV, FLV, MP4 |
@@ -176,7 +178,15 @@ object MagicNumber {
   // Convenience checks
   def isPdf(header: Array[Byte]): Boolean
   def isZipBased(header: Array[Byte]): Boolean
+  def isRtf(header: Array[Byte]): Boolean
+  def isDocument(header: Array[Byte]): Boolean
+  def hasTextBom(header: Array[Byte]): Boolean
+  def isLikelyPlainText(header: Array[Byte]): Boolean
   def isAllowed(header: Array[Byte], allowedMimeTypes: Set[String]): Boolean
+
+  // Resume upload validation
+  val ResumeMimeTypes: Set[String]  // Common MIME types for resumes
+  def isResumeFormat(header: Array[Byte]): Boolean
 }
 ```
 
@@ -197,6 +207,31 @@ def validateUpload(bytes: Array[Byte], claimedMime: String): Boolean = {
 val safeTypes = Set("application/pdf", "image/png", "image/jpeg")
 if (!MagicNumber.isAllowed(header, safeTypes)) {
   throw new SecurityException("File type not allowed")
+}
+```
+
+**Resume upload validation** - Built-in support for common resume formats:
+
+```scala
+def handleResumeUpload(bytes: Array[Byte]): Either[String, Unit] = {
+  val header = bytes.take(MagicNumber.HeaderLength)
+  
+  if (!MagicNumber.isResumeFormat(header)) {
+    Left("Please upload a PDF, Word document, RTF, or plain text file")
+  } else {
+    Right(processResume(bytes))
+  }
+}
+
+// Or check specific document types
+if (MagicNumber.isPdf(header)) {
+  // Handle PDF
+} else if (MagicNumber.isZipBased(header)) {
+  // Handle DOCX/ODT (ZIP-based)
+} else if (MagicNumber.isRtf(header)) {
+  // Handle RTF
+} else if (MagicNumber.isLikelyPlainText(header)) {
+  // Handle plain text
 }
 ```
 

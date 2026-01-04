@@ -109,16 +109,131 @@ object MagicNumber {
     headerSeq = Array(0x50, 0x4b, 0x03, 0x04),
     ext = "zip",
     mimeType = "application/zip",
-    supportedExtensions = Vector("zip", "docx", "xlsx", "pptx", "odt", "ods", "odp", "jar", "apk")
+    supportedExtensions = Vector("zip", "docx", "xlsx", "pptx", "odt", "ods", "odp", "jar", "apk", "epub")
+  )
+
+  // Empty ZIP archive (for edge cases)
+  private val ZIP_EMPTY = FileSignature(
+    name = "ZIP (empty)",
+    headerSeq = Array(0x50, 0x4b, 0x05, 0x06),
+    ext = "zip",
+    mimeType = "application/zip",
+    supportedExtensions = Vector("zip")
+  )
+
+  // Spanned ZIP archive
+  private val ZIP_SPANNED = FileSignature(
+    name = "ZIP (spanned)",
+    headerSeq = Array(0x50, 0x4b, 0x07, 0x08),
+    ext = "zip",
+    mimeType = "application/zip",
+    supportedExtensions = Vector("zip")
   )
 
   private val DOC = FileSignature(
-    name = "Microsoft Word (legacy)",
+    name = "Microsoft Compound Document",
     headerSeq =
       Array(0xd0.toByte, 0xcf.toByte, 0x11, 0xe0.toByte, 0xa1.toByte, 0xb1.toByte, 0x1a, 0xe1.toByte),
     ext = "doc",
     mimeType = "application/msword",
-    supportedExtensions = Vector("doc", "xls", "ppt")
+    supportedExtensions = Vector("doc", "xls", "ppt", "msg", "vsd", "msi")
+  )
+
+  // Rich Text Format - common for resumes
+  private val RTF = FileSignature(
+    name = "Rich Text Format",
+    headerSeq = Array(0x7b, 0x5c, 0x72, 0x74, 0x66, 0x31), // {\rtf1
+    ext = "rtf",
+    mimeType = "application/rtf",
+    supportedExtensions = Vector("rtf")
+  )
+
+  // OpenDocument Text (LibreOffice/OpenOffice) - starts with PK but we list for documentation
+  // Detection requires ZIP inspection, so this is handled by ZIP signature
+
+  // WordPerfect document
+  private val WPD = FileSignature(
+    name = "WordPerfect",
+    headerSeq = Array(0xff.toByte, 0x57, 0x50, 0x43), // WPC with FF prefix
+    ext = "wpd",
+    mimeType = "application/vnd.wordperfect",
+    supportedExtensions = Vector("wpd")
+  )
+
+  // ============================================================================
+  // Text file types (heuristic detection)
+  // ============================================================================
+
+  // UTF-8 BOM
+  private val UTF8_BOM = FileSignature(
+    name = "UTF-8 Text (BOM)",
+    headerSeq = Array(0xef.toByte, 0xbb.toByte, 0xbf.toByte),
+    ext = "txt",
+    mimeType = "text/plain",
+    supportedExtensions = Vector("txt", "text", "md", "markdown", "csv", "json", "xml", "html", "css", "js")
+  )
+
+  // UTF-16 LE BOM
+  private val UTF16_LE_BOM = FileSignature(
+    name = "UTF-16 LE Text (BOM)",
+    headerSeq = Array(0xff.toByte, 0xfe.toByte),
+    ext = "txt",
+    mimeType = "text/plain",
+    supportedExtensions = Vector("txt", "text")
+  )
+
+  // UTF-16 BE BOM
+  private val UTF16_BE_BOM = FileSignature(
+    name = "UTF-16 BE Text (BOM)",
+    headerSeq = Array(0xfe.toByte, 0xff.toByte),
+    ext = "txt",
+    mimeType = "text/plain",
+    supportedExtensions = Vector("txt", "text")
+  )
+
+  // UTF-32 LE BOM
+  private val UTF32_LE_BOM = FileSignature(
+    name = "UTF-32 LE Text (BOM)",
+    headerSeq = Array(0xff.toByte, 0xfe.toByte, 0x00, 0x00),
+    ext = "txt",
+    mimeType = "text/plain",
+    supportedExtensions = Vector("txt", "text")
+  )
+
+  // UTF-32 BE BOM
+  private val UTF32_BE_BOM = FileSignature(
+    name = "UTF-32 BE Text (BOM)",
+    headerSeq = Array(0x00, 0x00, 0xfe.toByte, 0xff.toByte),
+    ext = "txt",
+    mimeType = "text/plain",
+    supportedExtensions = Vector("txt", "text")
+  )
+
+  // XML declaration (common for XML-based documents)
+  private val XML = FileSignature(
+    name = "XML",
+    headerSeq = Array(0x3c, 0x3f, 0x78, 0x6d, 0x6c), // <?xml
+    ext = "xml",
+    mimeType = "application/xml",
+    supportedExtensions = Vector("xml", "xsl", "xslt", "svg", "xhtml")
+  )
+
+  // HTML doctype
+  private val HTML_DOCTYPE = FileSignature(
+    name = "HTML",
+    headerSeq = Array(0x3c, 0x21, 0x44, 0x4f, 0x43, 0x54, 0x59, 0x50, 0x45), // <!DOCTYPE
+    ext = "html",
+    mimeType = "text/html",
+    supportedExtensions = Vector("html", "htm")
+  )
+
+  // HTML tag
+  private val HTML_TAG = FileSignature(
+    name = "HTML",
+    headerSeq = Array(0x3c, 0x68, 0x74, 0x6d, 0x6c), // <html
+    ext = "html",
+    mimeType = "text/html",
+    supportedExtensions = Vector("html", "htm")
   )
 
   // ============================================================================
@@ -269,13 +384,28 @@ object MagicNumber {
    * All known file signatures.
    *
    * Order matters - more specific signatures should come before less specific ones. For example,
-   * PDF should come before generic signatures.
+   * longer signatures should come before shorter ones that share the same prefix.
    */
   val Signatures: Vector[FileSignature] = Vector(
     // Documents (most common for resume import)
     PDF,
+    RTF,
+    WPD,
+    DOC, // Compound document (doc, xls, ppt, etc.)
+    // Text with BOM (more specific, check before generic text)
+    UTF32_LE_BOM, // Check 4-byte BOMs first
+    UTF32_BE_BOM,
+    UTF8_BOM, // Then 3-byte
+    UTF16_LE_BOM, // Then 2-byte (but after UTF-32 LE which starts same)
+    UTF16_BE_BOM,
+    // Markup languages
+    XML,
+    HTML_DOCTYPE,
+    HTML_TAG,
+    // ZIP-based (includes docx, xlsx, odt, epub, etc.)
     ZIP,
-    DOC,
+    ZIP_EMPTY,
+    ZIP_SPANNED,
     // Images
     PNG,
     JPEG,
@@ -375,5 +505,85 @@ object MagicNumber {
    */
   def isZipBased(header: Array[Byte]): Boolean = {
     detect(header).exists(_.mimeType == "application/zip")
+  }
+
+  /**
+   * Check if the file is a document format commonly used for resumes.
+   *
+   * Includes: PDF, DOC/DOCX (via ZIP), RTF, ODT (via ZIP), plain text with BOM
+   */
+  def isDocument(header: Array[Byte]): Boolean = {
+    val documentMimeTypes = Set(
+      "application/pdf",
+      "application/msword",
+      "application/rtf",
+      "application/vnd.wordperfect",
+      "application/zip", // DOCX, ODT, etc.
+      "text/plain"
+    )
+    detect(header).exists(sig => documentMimeTypes.contains(sig.mimeType))
+  }
+
+  /**
+   * Check if the file is RTF (Rich Text Format).
+   */
+  def isRtf(header: Array[Byte]): Boolean = {
+    detect(header).exists(_.mimeType == "application/rtf")
+  }
+
+  /**
+   * Check if the file has a text encoding BOM (Byte Order Mark).
+   */
+  def hasTextBom(header: Array[Byte]): Boolean = {
+    detect(header).exists(sig => sig.mimeType == "text/plain" && sig.name.contains("BOM"))
+  }
+
+  /**
+   * Check if the file appears to be plain text (no magic bytes detected).
+   *
+   * This is a heuristic check - if no binary signature is detected and the first bytes
+   * are printable ASCII or valid UTF-8, it's likely plain text.
+   */
+  def isLikelyPlainText(header: Array[Byte]): Boolean = {
+    if (header.isEmpty) return false
+    // If we detect a known binary format, it's not plain text
+    detect(header) match {
+      case Some(sig) => sig.mimeType == "text/plain" || sig.mimeType == "text/html" || sig.mimeType == "application/xml"
+      case None =>
+        // Check if bytes look like text (printable ASCII + common control chars)
+        header.take(512).forall { b =>
+          val unsigned = b & 0xff
+          // Printable ASCII (32-126), tab (9), newline (10), carriage return (13)
+          (unsigned >= 32 && unsigned <= 126) || unsigned == 9 || unsigned == 10 || unsigned == 13 ||
+          // High bytes could be UTF-8 continuation
+          unsigned >= 128
+        }
+    }
+  }
+
+  /**
+   * Common MIME types for resume file uploads.
+   */
+  val ResumeMimeTypes: Set[String] = Set(
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx actual mime
+    "application/zip", // DOCX detected as ZIP
+    "application/rtf",
+    "text/plain",
+    "text/html",
+    "application/xml"
+  )
+
+  /**
+   * Check if the file type is acceptable for resume upload.
+   *
+   * Accepts: PDF, DOC, DOCX, RTF, ODT, TXT, HTML
+   */
+  def isResumeFormat(header: Array[Byte]): Boolean = {
+    detect(header) match {
+      case Some(sig) => ResumeMimeTypes.contains(sig.mimeType)
+      case None => isLikelyPlainText(header)
+    }
   }
 }
