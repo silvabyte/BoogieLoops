@@ -1,6 +1,9 @@
 # BoogieLoops Kit: General Purpose Utilities
 
-Lightweight utilities for Scala 3 applications. Currently includes `DotEnv` for unified environment variable access from `.env` files and system environment.
+Lightweight utilities for Scala 3 applications.
+
+- **DotEnv**: Unified environment variable access from `.env` files and system environment
+- **MagicNumber**: File type detection via magic bytes (not file extensions)
 
 ## Install
 
@@ -107,6 +110,129 @@ The `overrideExisting` parameter controls how duplicate keys in the file are han
 
 DotEnv.load(overrideExisting = true).get("KEY")   // Some("second") - last wins
 DotEnv.load(overrideExisting = false).get("KEY")  // Some("first") - first wins
+```
+
+## MagicNumber
+
+Detect file types by reading magic bytes from file headers. This is more reliable than checking file extensions, which can be spoofed or incorrect.
+
+### Quickstart
+
+```scala
+import boogieloops.kit.MagicNumber
+
+// Detect from raw bytes (e.g., from upload)
+val header = fileBytes.take(MagicNumber.HeaderLength)
+MagicNumber.detect(header) match {
+  case Some(sig) => println(s"File type: ${sig.name}, MIME: ${sig.mimeType}")
+  case None      => println("Unknown file type")
+}
+
+// Detect from file path
+MagicNumber.detect(os.pwd / "document.pdf")  // Some(FileSignature(...))
+
+// Convenience checks
+MagicNumber.isPdf(header)       // true/false
+MagicNumber.isZipBased(header)  // true for ZIP, DOCX, XLSX, etc.
+
+// Validate against allowed types
+val allowed = Set("application/pdf", "image/png", "image/jpeg")
+MagicNumber.isAllowed(header, allowed)  // true if file type is in set
+```
+
+### Supported File Types
+
+| Category | Formats |
+|----------|---------|
+| Documents | PDF, RTF, DOC (legacy), WordPerfect |
+| Office (ZIP-based) | DOCX, XLSX, PPTX, ODT, ODS, ODP, EPUB |
+| Text | UTF-8/16/32 with BOM, XML, HTML |
+| Images | PNG, JPEG, GIF, BMP, WEBP, TIFF |
+| Compressed | RAR, 7Z, GZIP, BZIP2, XZ |
+| Audio | MP3, WAV, FLAC, OGG |
+| Video | MKV, FLV, MP4 |
+| Executables | EXE/DLL, ELF, Mach-O, Java Class |
+
+### API Reference
+
+```scala
+case class FileSignature(
+  name: String,              // Human-readable name (e.g., "PDF")
+  headerSeq: Array[Byte],    // Magic bytes
+  ext: String,               // Primary extension (e.g., "pdf")
+  mimeType: String,          // MIME type (e.g., "application/pdf")
+  supportedExtensions: Vector[String]  // All valid extensions
+)
+
+object MagicNumber {
+  val HeaderLength: Int = 24  // Recommended bytes to read
+  val Signatures: Vector[FileSignature]  // All known signatures
+
+  // Detect from raw bytes
+  def detect(header: Array[Byte]): Option[FileSignature]
+
+  // Detect from file path
+  def detect(path: os.Path): Option[FileSignature]
+  def detect(path: java.nio.file.Path): Option[FileSignature]
+
+  // Convenience checks
+  def isPdf(header: Array[Byte]): Boolean
+  def isZipBased(header: Array[Byte]): Boolean
+  def isRtf(header: Array[Byte]): Boolean
+  def isDocument(header: Array[Byte]): Boolean
+  def hasTextBom(header: Array[Byte]): Boolean
+  def isLikelyPlainText(header: Array[Byte]): Boolean
+  def isAllowed(header: Array[Byte], allowedMimeTypes: Set[String]): Boolean
+
+  // Resume upload validation
+  val ResumeMimeTypes: Set[String]  // Common MIME types for resumes
+  def isResumeFormat(header: Array[Byte]): Boolean
+}
+```
+
+### Use Cases
+
+**File upload validation** - Verify uploaded files match their claimed type:
+
+```scala
+def validateUpload(bytes: Array[Byte], claimedMime: String): Boolean = {
+  val header = bytes.take(MagicNumber.HeaderLength)
+  MagicNumber.detect(header).exists(_.mimeType == claimedMime)
+}
+```
+
+**Security filtering** - Block executable uploads:
+
+```scala
+val safeTypes = Set("application/pdf", "image/png", "image/jpeg")
+if (!MagicNumber.isAllowed(header, safeTypes)) {
+  throw new SecurityException("File type not allowed")
+}
+```
+
+**Resume upload validation** - Built-in support for common resume formats:
+
+```scala
+def handleResumeUpload(bytes: Array[Byte]): Either[String, Unit] = {
+  val header = bytes.take(MagicNumber.HeaderLength)
+  
+  if (!MagicNumber.isResumeFormat(header)) {
+    Left("Please upload a PDF, Word document, RTF, or plain text file")
+  } else {
+    Right(processResume(bytes))
+  }
+}
+
+// Or check specific document types
+if (MagicNumber.isPdf(header)) {
+  // Handle PDF
+} else if (MagicNumber.isZipBased(header)) {
+  // Handle DOCX/ODT (ZIP-based)
+} else if (MagicNumber.isRtf(header)) {
+  // Handle RTF
+} else if (MagicNumber.isLikelyPlainText(header)) {
+  // Handle plain text
+}
 ```
 
 ## Testing
