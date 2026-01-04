@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-01-04
+
+* feat: add MagicNumber file type detection utility (#25)
+* docs: sync installation versions to 0.5.6
+
 ## [0.5.6] - 2026-01-01
 
 * feat: Add Kit module with DotEnv utility (#24)
