@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-03-17
+
+* fix: preserve field order in JSON Schema output (#27)
+* docs: sync installation versions to 0.6.0
+
 ## [0.6.0] - 2026-01-04
 
 * feat: add MagicNumber file type detection utility (#25)

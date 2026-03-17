@@ -1,6 +1,6 @@
 {
   "name": "boogieloops",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "scripts": {
     "test": "echo \"add your test command here\"",
