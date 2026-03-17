@@ -1,5 +1,6 @@
 package boogieloops.schema.derivation
 
+import scala.collection.immutable.ListMap
 import scala.deriving.*
 import scala.compiletime.*
 import scala.quoted.*
@@ -76,7 +77,7 @@ object Schematic {
   inline def deriveProduct[T](p: Mirror.ProductOf[T]): Schema = {
     val elemLabels = getElemLabels[p.MirroredElemLabels]
     val elemSchemas = getElemSchemas[T, p.MirroredElemTypes]
-    val properties = elemLabels.zip(elemSchemas).toMap
+    val properties = elemLabels.zip(elemSchemas).to(ListMap)
     val required = getRequiredFields[p.MirroredElemTypes](elemLabels)
 
     bl.Object(
@@ -104,7 +105,7 @@ object Schematic {
         }
     }
 
-    val properties = elemLabels.zip(elemSchemasWithAnnotations).toMap
+    val properties = elemLabels.zip(elemSchemasWithAnnotations).to(ListMap)
     val required =
       getRequiredFieldsWithDefaults[T, p.MirroredElemTypes](elemLabels, fieldAnnotations)
 
@@ -211,7 +212,7 @@ object Schematic {
       case obj: boogieloops.schema.complex.ObjectSchema =>
         // Add "type" field with the variant name as a constant
         val typeField = bl.String(const = Some(typeName))
-        val updatedProperties = obj.properties + ("type" -> typeField)
+        val updatedProperties = ListMap("type" -> typeField) ++ obj.properties
         val updatedRequired = obj.required + "type"
 
         obj.copy(
@@ -221,7 +222,7 @@ object Schematic {
       case _ =>
         // For non-object schemas, wrap in an object with just the type field
         bl.Object(
-          properties = Map("type" -> bl.String(const = Some(typeName))),
+          properties = ListMap("type" -> bl.String(const = Some(typeName))),
           required = Set("type")
         )
     }

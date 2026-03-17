@@ -1,5 +1,7 @@
 package boogieloops.schema.complex
 
+import scala.collection.immutable.ListMap
+
 import boogieloops.schema.Schema
 import boogieloops.schema.validation.{ValidationResult, ValidationContext}
 
@@ -9,7 +11,7 @@ import scala.util.matching.Regex
  * Object schema type with JSON Schema 2020-12 validation keywords
  */
 case class ObjectSchema(
-    properties: Map[String, Schema] = Map.empty,
+    properties: Map[String, Schema] = ListMap.empty,
     required: Set[String] = Set.empty,
     minProperties: Option[Int] = None,
     maxProperties: Option[Int] = None,
@@ -33,9 +35,11 @@ case class ObjectSchema(
       schema("properties") = ujson.Obj.from(propsMap)
     }
 
-    // Required properties
+    // Required properties - ordered by properties key order when available
     if (required.nonEmpty) {
-      schema("required") = ujson.Arr(required.map(ujson.Str(_)).toSeq*)
+      val orderedRequired =
+        properties.keys.filter(required.contains).toList ++ required.filterNot(properties.contains)
+      schema("required") = ujson.Arr(orderedRequired.map(ujson.Str(_))*)
     }
 
     // Validation keywords

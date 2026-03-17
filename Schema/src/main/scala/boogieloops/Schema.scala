@@ -1,5 +1,7 @@
 package boogieloops.schema
 
+import scala.collection.immutable.ListMap
+
 import boogieloops.schema.primitives.*
 import boogieloops.schema.complex.*
 import boogieloops.schema.composition.*
@@ -173,7 +175,7 @@ object bl {
 
   def Object(
       properties: (String, Schema)*
-  ): ObjectSchema = ObjectSchema(properties.toMap)
+  ): ObjectSchema = ObjectSchema(properties.to(ListMap))
 
   def Object(
       properties: Map[String, Schema],
