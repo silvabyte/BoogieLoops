@@ -19,6 +19,18 @@ trait Schematic[T] {
   def schema: Schema
 }
 
+/**
+ * Data class that carries all per-field information extracted by the macro.
+ * This replaces the information that was previously computed by five separate
+ * inline recursive methods, avoiding the inline recursion limit for large case classes.
+ */
+case class DerivedFieldInfo(
+    labels: List[String],
+    schemas: List[Schema],
+    isOption: List[Boolean],
+    hasScalaDefault: List[Boolean]
+)
+
 object Schematic {
 
   /**
@@ -75,10 +87,11 @@ object Schematic {
    * Derive schema for product types (case classes) - original method
    */
   inline def deriveProduct[T](p: Mirror.ProductOf[T]): Schema = {
-    val elemLabels = getElemLabels[p.MirroredElemLabels]
-    val elemSchemas = getElemSchemas[T, p.MirroredElemTypes]
-    val properties = elemLabels.zip(elemSchemas).to(ListMap)
-    val required = getRequiredFields[p.MirroredElemTypes](elemLabels)
+    val info = deriveProductFields[T]
+    val properties = info.labels.zip(info.schemas).to(ListMap)
+    val required = info.labels.zipWithIndex.collect {
+      case (label, idx) if !info.isOption(idx) => label
+    }.toSet
 
     bl.Object(
       properties = properties,
@@ -90,13 +103,14 @@ object Schematic {
    * Derive schema for product types (case classes) with annotation processing
    */
   inline def deriveProductWithAnnotations[T](p: Mirror.ProductOf[T]): Schema = {
-    val elemLabels = getElemLabels[p.MirroredElemLabels]
+    // Single macro call extracts all field info — no inline recursion
+    val info = deriveProductFields[T]
 
-    // Extract field annotations for all fields
+    // Existing macro call for annotations — already non-recursive
     val fieldAnnotations = AnnotationProcessor.extractAllFieldAnnotations[T]
 
-    // Generate schemas for each element with annotations applied
-    val elemSchemasWithAnnotations = elemLabels.zip(getElemSchemas[T, p.MirroredElemTypes]).map {
+    // Apply annotations to schemas (runtime, no inline)
+    val elemSchemasWithAnnotations = info.labels.zip(info.schemas).map {
       case (label, schema) =>
         fieldAnnotations.get(label) match {
           case Some(metadata) if metadata.nonEmpty =>
@@ -105,11 +119,16 @@ object Schematic {
         }
     }
 
-    val properties = elemLabels.zip(elemSchemasWithAnnotations).to(ListMap)
-    val required =
-      getRequiredFieldsWithDefaults[T, p.MirroredElemTypes](elemLabels, fieldAnnotations)
+    val properties = info.labels.zip(elemSchemasWithAnnotations).to(ListMap)
 
-    // Create base object schema
+    // Compute required fields at runtime using pre-computed isOption and hasScalaDefault
+    val required = info.labels.zipWithIndex.collect {
+      case (label, idx) if !info.isOption(idx) =>
+        val hasAnnotationDefault = fieldAnnotations.get(label).exists(_.default.isDefined)
+        val hasDefault = hasAnnotationDefault || info.hasScalaDefault(idx)
+        if (!hasDefault) Some(label) else None
+    }.flatten.toSet
+
     val baseObjectSchema = bl.Object(
       properties = properties,
       required = required
@@ -117,9 +136,7 @@ object Schematic {
 
     // Apply class-level annotations
     val classMetadata = AnnotationProcessor.extractClassAnnotations[T]
-    val enhancedSchema = AnnotationProcessor.applyMetadata(baseObjectSchema, classMetadata)
-
-    enhancedSchema
+    AnnotationProcessor.applyMetadata(baseObjectSchema, classMetadata)
   }
 
   /**
@@ -267,108 +284,6 @@ object Schematic {
   }
 
   /**
-   * Determine required fields (non-Option types)
-   */
-  inline def getRequiredFields[Elems <: Tuple](labels: List[String]): Set[String] = {
-    inline erasedValue[Elems] match
-      case _: (head *: tail) =>
-        val requiredTail = getRequiredFields[tail](labels.tail)
-        inline erasedValue[head] match
-          case _: Option[_] => requiredTail
-          case _ => requiredTail + labels.head
-      case _: EmptyTuple => Set.empty
-  }
-
-  /**
-   * Determine required fields considering both Option types, @Schematic.default annotations and Scala defaults
-   * Fields are required if they are:
-   * 1. Not Option[_] types AND
-   * 2. Do not have @Schematic.default annotations AND
-   * 3. Do not have Scala case class default parameters
-   */
-  inline def getRequiredFieldsWithDefaults[T, Elems <: Tuple](
-      labels: List[String],
-      fieldAnnotations: Map[String, AnnotationProcessor.AnnotationMetadata]
-  ): Set[String] =
-    getRequiredFieldsWithDefaultsHelper[T, Elems](labels, fieldAnnotations, Set.empty, 0)
-
-  /**
-   * Helper function to determine required fields recursively
-   */
-  inline def getRequiredFieldsWithDefaultsHelper[T, Elems <: Tuple](
-      labels: List[String],
-      fieldAnnotations: Map[String, AnnotationProcessor.AnnotationMetadata],
-      acc: Set[String],
-      fieldIndex: Int
-  ): Set[String] = {
-    inline erasedValue[Elems] match
-      case _: (head *: tail) =>
-        val fieldName = labels.head
-        val newAcc = inline erasedValue[head] match
-          case _: Option[_] =>
-            // Optional fields are never required
-            acc
-          case _ =>
-            // Check if field has @Schematic.default annotation
-            val hasAnnotationDefault = fieldAnnotations.get(fieldName).exists(_.default.isDefined)
-
-            // Check if field has Scala case class default parameter
-            val hasScalaDefault = hasScalaDefaultValue[T](fieldIndex)
-
-            if (hasAnnotationDefault || hasScalaDefault) {
-              acc
-            } else {
-              acc + fieldName
-            }
-
-        getRequiredFieldsWithDefaultsHelper[T, tail](
-          labels.tail,
-          fieldAnnotations,
-          newAcc,
-          fieldIndex + 1
-        )
-      case _: EmptyTuple => acc
-  }
-
-  /**
-   * Check if a field at the given index has a default value in the case class definition
-   * Uses compile-time reflection to detect Scala default parameters
-   */
-  inline def hasScalaDefaultValue[T](fieldIndex: Int): Boolean =
-    ${ hasScalaDefaultValueImpl[T]('fieldIndex) }
-
-  /**
-   * Macro implementation to detect default values at compile time using field index
-   */
-  def hasScalaDefaultValueImpl[T: Type](fieldIndexExpr: Expr[Int])(using Quotes): Expr[Boolean] = {
-    import quotes.reflect.*
-
-    val fieldIndex = fieldIndexExpr.valueOrAbort
-    val tpe = TypeRepr.of[T]
-
-    try {
-      // Get the companion object
-      val companionSym = tpe.typeSymbol.companionModule
-      if (companionSym == Symbol.noSymbol) {
-        Expr(false)
-      } else {
-        // Default methods are named $lessinit$greater$default$N (1-indexed)
-        val defaultMethodName = s"$$lessinit$$greater$$default$$${fieldIndex + 1}"
-
-        // Check if the companion object has the default method
-        val companionType = companionSym.termRef
-        val hasDefaultMethod = companionType.typeSymbol.declaredMethod(defaultMethodName).nonEmpty
-
-        Expr(hasDefaultMethod)
-      }
-    } catch {
-      case _ =>
-        // If any reflection fails, assume no default
-        Expr(false)
-    }
-  }
-
-  /**
    * Basic Schematic instances for primitive types
    */
   given Schematic[String] = instance(bl.String())
@@ -380,6 +295,166 @@ object Schematic {
 
   given [T](using s: Schematic[T]): Schematic[Option[T]] = instance(s.schema.optional)
   given [T](using s: Schematic[T]): Schematic[List[T]] = instance(bl.Array(s.schema))
+
+  /**
+   * Macro bridge to extract all field information for product type derivation.
+   * This consumes zero inline budget compared to recursive inline methods.
+   */
+  inline def deriveProductFields[T]: DerivedFieldInfo =
+    ${ deriveProductFieldsImpl[T] }
+
+  /**
+   * Macro implementation that extracts all field information for product types.
+   * Iterates fields via primaryConstructor.paramSymss.flatten to avoid inline recursion limit.
+   */
+  private def deriveProductFieldsImpl[T: Type](using Quotes): Expr[DerivedFieldInfo] = {
+    import quotes.reflect.*
+
+    val tpe = TypeRepr.of[T]
+    val typeSymbol = tpe.typeSymbol
+
+    val fields = typeSymbol.primaryConstructor.paramSymss.flatten
+
+    val fieldLabels = fields.map(_.name)
+
+    val isOptionFlags = fields.map { fieldSym =>
+      val fieldType = getFieldType(fieldSym)
+      isOptionType(fieldType)
+    }
+
+    val hasDefaultFlags = fields.zipWithIndex.map { case (_, idx) =>
+      hasDefaultParam(tpe, idx)
+    }
+
+    val schemaExprs = fields.map { fieldSym =>
+      val fieldType = getFieldType(fieldSym)
+      schemaForType(fieldType)
+    }
+
+    val labelsExpr = Expr.ofList(fieldLabels.map(Expr(_)))
+    val schemasExpr = Expr.ofList(schemaExprs)
+    val isOptionExpr = Expr.ofList(isOptionFlags.map(Expr(_)))
+    val hasScalaDefaultExpr = Expr.ofList(hasDefaultFlags.map(Expr(_)))
+
+    '{
+      DerivedFieldInfo(
+        labels = $labelsExpr,
+        schemas = $schemasExpr,
+        isOption = $isOptionExpr,
+        hasScalaDefault = $hasScalaDefaultExpr
+      )
+    }
+  }
+
+  /**
+   * Get the TypeRepr for a field symbol, handling edge cases.
+   */
+  private def getFieldType(using Quotes)(fieldSym: quotes.reflect.Symbol): quotes.reflect.TypeRepr = {
+    import quotes.reflect.*
+    fieldSym.termRef.widenTermRefByName
+  }
+
+  /**
+   * Check if a type is Option[_].
+   */
+  private def isOptionType(using Quotes)(tpe: quotes.reflect.TypeRepr): Boolean = {
+    import quotes.reflect.*
+    val dealiased = tpe.dealias
+    dealiased.typeSymbol == TypeRepr.of[Option[?]].typeSymbol
+  }
+
+  /**
+   * Check if a type is List[_].
+   */
+  private def isListType(using Quotes)(tpe: quotes.reflect.TypeRepr): Boolean = {
+    import quotes.reflect.*
+    val dealiased = tpe.dealias
+    dealiased.typeSymbol == TypeRepr.of[List[?]].typeSymbol
+  }
+
+  /**
+   * Map a TypeRepr to an Expr[Schema].
+   * This replaces the inline getElemSchema method.
+   */
+  private def schemaForType(using Quotes)(tpe: quotes.reflect.TypeRepr): Expr[Schema] = {
+    import quotes.reflect.*
+
+    val dealiased = tpe.dealias
+
+    def isPrimitiveType: Option[Expr[Schema]] = {
+      // Only match concrete primitive types, not type parameters
+      if (dealiased.typeSymbol.isTypeParam) None
+      else if (dealiased =:= TypeRepr.of[String]) Some('{ bl.String() })
+      else if (dealiased =:= TypeRepr.of[Int]) Some('{ bl.Integer() })
+      else if (dealiased =:= TypeRepr.of[Long]) Some('{ bl.Integer() })
+      else if (dealiased =:= TypeRepr.of[Double]) Some('{ bl.Number() })
+      else if (dealiased =:= TypeRepr.of[Float]) Some('{ bl.Number() })
+      else if (dealiased =:= TypeRepr.of[Boolean]) Some('{ bl.Boolean() })
+      else None
+    }
+
+    def handleOptionType: Option[Expr[Schema]] = {
+      if (isOptionType(dealiased)) {
+        val innerType = dealiased.typeArgs.head
+        val innerSchema = schemaForType(innerType)
+        Some('{ $innerSchema.optional })
+      } else None
+    }
+
+    def handleListType: Option[Expr[Schema]] = {
+      if (isListType(dealiased)) {
+        val innerType = dealiased.typeArgs.head
+        val innerSchema = schemaForType(innerType)
+        Some('{ bl.Array($innerSchema) })
+      } else None
+    }
+
+    def summonSchematic: Expr[Schema] = {
+      import quotes.reflect.*
+      // For type parameters or complex types, use Implicits.search which is safer than .asType
+      val schematicType = TypeRepr.of[Schematic].appliedTo(dealiased)
+      Implicits.search(schematicType) match {
+        case result: ImplicitSearchSuccess =>
+          // Build an expression that calls .schema on the found Schematic instance
+          // Use Select to access the .schema field/method directly
+          val schematicTree = result.tree
+          val schemaSelect = Select.unique(schematicTree, "schema")
+          schemaSelect.asExprOf[Schema]
+        case failure: ImplicitSearchFailure =>
+          report.errorAndAbort(
+            s"Cannot derive Schematic for type ${tpe.show}. ${failure.explanation} " +
+              "Please ensure the type either: (1) is a primitive type (String, Int, Boolean, etc.), " +
+              "(2) is Option[T] or List[T] where T has a Schematic, or " +
+              "(3) has a given Schematic instance in scope or uses `derives Schematic`."
+          )
+      }
+    }
+
+    isPrimitiveType
+      .orElse(handleOptionType)
+      .orElse(handleListType)
+      .getOrElse(summonSchematic)
+  }
+
+  /**
+   * Check if a field at the given index has a default value in the case class definition.
+   * Uses compile-time reflection to detect Scala default parameters.
+   */
+  private def hasDefaultParam(using Quotes)(tpe: quotes.reflect.TypeRepr, fieldIndex: Int): Boolean = {
+    import quotes.reflect.*
+    try {
+      val companionSym = tpe.typeSymbol.companionModule
+      if (companionSym == Symbol.noSymbol) {
+        false
+      } else {
+        val defaultMethodName = s"$$lessinit$$greater$$default$$${fieldIndex + 1}"
+        val companionType = companionSym.termRef
+        companionType.typeSymbol.declaredMethod(defaultMethodName).nonEmpty
+      }
+    } catch {
+      case _ => false
+    }
+  }
 
 }
 

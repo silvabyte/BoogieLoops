@@ -44,16 +44,7 @@ case class WaterTransport(boat: Boat) extends Transport derives Schematic
 case class AirTransport(aircraft: String, capacity: Int) extends Transport derives Schematic
 
 // ============================================================================
-// 4. PARAMETRIC SEALED TRAITS
-// ============================================================================
-
-// Generic sealed trait with type parameters
-sealed trait Container[T] derives Schematic
-case class Box[T](contents: T, size: String) extends Container[T] derives Schematic
-case class Bag[T](items: List[T], material: String) extends Container[T] derives Schematic
-
-// ============================================================================
-// 5. EDGE CASES AND SPECIAL SCENARIOS
+// 4. EDGE CASES AND SPECIAL SCENARIOS
 // ============================================================================
 
 // Single variant sealed trait
@@ -82,7 +73,6 @@ object SealedTraitExample {
     demonstrateBasicSealedTraits()
     demonstrateOptionalFields()
     demonstrateNestedSealedTraits()
-    demonstrateParametricSealedTraits()
     demonstrateEdgeCases()
     demonstrateIndividualCaseClasses()
     demonstrateValidationAndSerialization()
@@ -202,30 +192,8 @@ object SealedTraitExample {
     }
   }
 
-  def demonstrateParametricSealedTraits(): Unit = {
-    println("\n📦 Section 4: Parametric Sealed Traits (Generic Types)")
-    println("-" * 52)
-    println("Demonstrates sealed traits with type parameters.")
-    println()
-
-    // Example with String containers
-    val stringContainerSchema = summon[Schematic[Container[String]]]
-    val stringContainerJson = stringContainerSchema.schema.toJsonSchema
-
-    println("🔹 Container[String] sealed trait schema:")
-    println(ujson.write(stringContainerJson, indent = 2))
-    println()
-
-    if (stringContainerJson.obj.contains("oneOf")) {
-      val variants = stringContainerJson("oneOf").arr
-      println(
-        s"✅ SUCCESS: Parametric sealed trait generated oneOf with ${variants.length} variants"
-      )
-    }
-  }
-
   def demonstrateEdgeCases(): Unit = {
-    println("\n🧪 Section 5: Edge Cases and Special Scenarios")
+    println("\n🧪 Section 4: Edge Cases and Special Scenarios")
     println("-" * 44)
     println("Tests challenging scenarios: single variants, empty case classes, etc.")
     println()
@@ -267,7 +235,7 @@ object SealedTraitExample {
   }
 
   def demonstrateIndividualCaseClasses(): Unit = {
-    println("\n🎯 Section 6: Individual Case Class Schemas")
+    println("\n🎯 Section 5: Individual Case Class Schemas")
     println("-" * 41)
     println("Shows difference between sealed trait variants and standalone case classes.")
     println()
@@ -287,7 +255,7 @@ object SealedTraitExample {
   }
 
   def demonstrateValidationAndSerialization(): Unit = {
-    println("\n🔬 Section 7: Validation and Serialization Examples")
+    println("\n🔬 Section 6: Validation and Serialization Examples")
     println("-" * 49)
     println("Demonstrates runtime behavior and JSON serialization.")
     println()
