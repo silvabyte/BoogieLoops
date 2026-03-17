@@ -10,13 +10,13 @@ Lightweight utilities for Scala 3 applications.
 Mill:
 
 ```scala
-mvn"dev.boogieloop::kit:0.6.0"
+mvn"dev.boogieloop::kit:0.6.1"
 ```
 
 SBT:
 
 ```scala
-libraryDependencies += "dev.boogieloop" %% "kit" % "0.6.0"
+libraryDependencies += "dev.boogieloop" %% "kit" % "0.6.1"
 ```
 
 ## DotEnv
